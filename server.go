@@ -40,6 +40,8 @@ func main() {
     r.HandleFunc(apiroot + "/delete/{path:.*}", handleApiRemove).Methods("POST")
     r.HandleFunc(apiroot + "/modify/{path:.*}", handleApiModify).Methods("POST")
     r.HandleFunc(apiroot + "/download/{path:.*}", handleApiDownload).Methods("GET")
+    r.HandleFunc(apiroot + "/list/{path:.*}", handleApiList).Methods("GET")
+    r.HandleFunc(apiroot + "/tree/{path:.*}", handleApiTree).Methods("GET")
 
     http.Handle("/", r)
     http.ListenAndServe(":8080", nil)
@@ -238,4 +240,96 @@ func handleApiDownload(rw http.ResponseWriter, req *http.Request) {
         }
         return
     }
+}
+
+func scanDir(root string, recurse bool) (items []JsonResponse, err error) {
+    type finfo struct {
+        name string
+        t string
+        items []JsonResponse
+    }
+    var files []os.FileInfo
+
+    files, err = ioutil.ReadDir(root)
+    if err != nil {
+        return nil, err
+    }
+    for _, file := range files {
+        fstruct := finfo{name: file.Name()}
+        if file.IsDir() {
+            fstruct.t = "d"
+            if recurse {
+                fstruct.items, err = scanDir(filepath.Join(root, fstruct.name), recurse)
+                if err != nil {
+                    return nil, err
+                }
+            }
+        } else {
+            fstruct.t = "f"
+        }
+        if recurse {
+            items = append(items, JsonResponse{"name": fstruct.name, "t": fstruct.t, "items": fstruct.items})
+        } else {
+            items = append(items, JsonResponse{"name": fstruct.name, "t": fstruct.t})
+        }
+    }
+    return items, nil
+}
+
+func handleApiList(rw http.ResponseWriter, req *http.Request) {
+    var (
+        vars = mux.Vars(req)
+        status string = "success"
+        reason string = ""
+        items []JsonResponse
+        path = fileroot + "/" + username + "/" + vars["path"]
+    )
+
+    if fi, err := os.Stat(path); err == nil {
+        if fi.Mode().IsDir() {
+            items, err = scanDir(path, false)
+            if err != nil {
+                status = "fail"
+                reason = err.Error()
+            }
+        } else {
+            status = "fail"
+            reason = "Not a directory."
+        }
+    } else {
+        status = "fail"
+        reason = err.Error()
+    }
+    rw.Header().Set("Content-Type", "application/json")
+    fmt.Fprint(rw, JsonResponse{"status": status, "reason": reason, "items": items})
+    return
+}
+
+func handleApiTree(rw http.ResponseWriter, req *http.Request) {
+    var (
+        vars = mux.Vars(req)
+        status string = "success"
+        reason string = ""
+        items []JsonResponse
+        path = fileroot + "/" + username + "/" + vars["path"]
+    )
+
+    if fi, err := os.Stat(path); err == nil {
+        if fi.Mode().IsDir() {
+            items, err = scanDir(path, true)
+            if err != nil {
+                status = "fail"
+                reason = err.Error()
+            }
+        } else {
+            status = "fail"
+            reason = "Not a directory."
+        }
+    } else {
+        status = "fail"
+        reason = err.Error()
+    }
+    rw.Header().Set("Content-Type", "application/json")
+    fmt.Fprint(rw, JsonResponse{"status": status, "reason": reason, "items": items})
+    return
 }
