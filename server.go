@@ -39,7 +39,7 @@ func main() {
     r.HandleFunc(apiroot + "/move", handleApiMove).Methods("POST")
     r.HandleFunc(apiroot + "/delete/{path:.*}", handleApiRemove).Methods("POST")
     r.HandleFunc(apiroot + "/modify/{path:.*}", handleApiModify).Methods("POST")
-
+    r.HandleFunc(apiroot + "/download/{path:.*}", handleApiDownload).Methods("GET")
 
     http.Handle("/", r)
     http.ListenAndServe(":8080", nil)
@@ -213,4 +213,29 @@ func handleApiModify(rw http.ResponseWriter, req *http.Request) {
     rw.Header().Set("Content-Type", "application/json")
     fmt.Fprint(rw, JsonResponse{"status": status, "reason": reason})
     return
+}
+
+func handleApiDownload(rw http.ResponseWriter, req *http.Request) {
+    var (
+        vars = mux.Vars(req)
+        path = fileroot + "/" + username + "/" + vars["path"]
+    )
+
+    // TODO: Sanitize path, so users can't write to places they shouldn't
+    if _, err := os.Stat(path); os.IsNotExist(err) {
+        rw.WriteHeader(http.StatusNotFound)
+        return
+    } else {
+        body, err := ioutil.ReadFile(path)
+        if err != nil {
+            rw.WriteHeader(http.StatusInternalServerError)
+            return
+        }
+        _, err = rw.Write(body)
+        if err != nil {
+            rw.WriteHeader(http.StatusInternalServerError)
+            return
+        }
+        return
+    }
 }
