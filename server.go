@@ -6,6 +6,9 @@ import (
     "html/template"
     "encoding/json"
     "time"
+    "io/ioutil"
+    "os"
+    "path/filepath"
     "github.com/gorilla/mux"
 )
 
@@ -14,9 +17,11 @@ type SiteData struct {
 }
 
 var (
-    APIROOT string = "/api"
+    apiroot string = "/api"
     ctx SiteData = SiteData{Root: "localhost"}
     tpls = template.Must(template.ParseFiles("tpls/login.html"))
+    fileroot string = "files"
+    username string = "apexskier"
 )
 
 func main() {
@@ -28,7 +33,10 @@ func main() {
     // Static files
     http.Handle("/static/", http.StripPrefix("/static", http.FileServer(http.Dir("static"))))
 
-    r.HandleFunc(APIROOT + "/", handleApiRoot).Methods("GET")
+    // API
+    r.HandleFunc(apiroot + "/", handleApiRoot).Methods("GET")
+    r.HandleFunc(apiroot + "/create/{path:.*}", handleApiCreate).Methods("POST")
+    r.HandleFunc(apiroot + "/move", handleApiMove).Methods("POST")
 
 
     http.Handle("/", r)
@@ -66,3 +74,94 @@ func handleApiRoot(rw http.ResponseWriter, req *http.Request) {
     return
 }
 
+func handleApiCreate(rw http.ResponseWriter, req *http.Request) {
+    var (
+        vars = mux.Vars(req)
+        status string = "success"
+        reason string = ""
+        path = fileroot + "/" + username + "/" + vars["path"]
+    )
+
+    // TODO: Sanitize path, so users can't write to places they shouldn't
+    if _, err := os.Stat(path); os.IsNotExist(err) {
+        if req.Body == nil {
+            return
+        }
+        body, err := ioutil.ReadAll(req.Body)
+        req.Body.Close()
+
+        err = os.MkdirAll(filepath.Dir(path), 0740)
+        if err != nil {
+            reason = err.Error()
+            status = "fail"
+        } else {
+            err = ioutil.WriteFile(path, body, 0740)
+            if err != nil {
+                reason = err.Error()
+                status = "fail"
+            }
+        }
+    } else {
+        status = "fail"
+        reason = "File exists."
+    }
+    rw.Header().Set("Content-Type", "application/json")
+    fmt.Fprint(rw, JsonResponse{"status": status, "reason": reason})
+    return
+}
+
+func handleApiMove(rw http.ResponseWriter, req *http.Request) {
+    var (
+        data map[string]interface{}
+        reason string = ""
+        status string = "success"
+    )
+    if req.Body == nil {
+        status = "fail"
+        reason = "No request body."
+    } else {
+        if req.Body == nil {
+            return
+        }
+        body, err := ioutil.ReadAll(req.Body)
+        req.Body.Close()
+
+        err = json.Unmarshal(body, &data)
+        if err != nil {
+            reason = err.Error()
+            status = "fail"
+        } else {
+            if src, oks := data["src"].(string); oks {
+                if dst, okd := data["dst"].(string); okd {
+                    path := fileroot + "/" + username + "/" + src
+                    dstpath := fileroot + "/" + username + "/" + dst
+                    if _, err = os.Stat(path); err == nil {
+                        err = os.MkdirAll(filepath.Dir(dstpath), 0740)
+                        if err != nil {
+                            reason = err.Error()
+                            status = "fail"
+                        } else {
+                            err = os.Rename(path, dstpath)
+                            if err != nil {
+                                reason = err.Error()
+                                status = "fail"
+                            }
+                        }
+                    } else {
+                        reason = "File doesn't exist."
+                        status = "fail"
+                    }
+                } else {
+                    reason = "Invalid json."
+                    status = "fail"
+                }
+            } else {
+                reason = "Invalid json."
+                status = "fail"
+            }
+        }
+    }
+    rw.Header().Set("Content-Type", "application/json")
+    fmt.Fprint(rw, JsonResponse{"status": status, "reason": reason})
+    return
+}
