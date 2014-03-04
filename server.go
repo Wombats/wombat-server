@@ -36,8 +36,8 @@ func main() {
     // API
     r.HandleFunc(apiroot + "/", handleApiRoot).Methods("GET")
     r.HandleFunc(apiroot + "/create/{path:.*}", jsonResponse(handleApiCreate)).Methods("POST")
-    r.HandleFunc(apiroot + "/move", handleApiMove).Methods("POST")
-    r.HandleFunc(apiroot + "/delete/{path:.*}", handleApiRemove).Methods("POST")
+    r.HandleFunc(apiroot + "/move", jsonResponse(handleApiMove)).Methods("POST")
+    r.HandleFunc(apiroot + "/delete/{path:.*}", jsonResponse(handleApiRemove)).Methods("POST")
     r.HandleFunc(apiroot + "/modify/{path:.*}", handleApiModify).Methods("POST")
     r.HandleFunc(apiroot + "/download/{path:.*}", handleApiDownload).Methods("GET")
     r.HandleFunc(apiroot + "/list/{path:.*}", handleApiList).Methods("GET")
@@ -47,9 +47,9 @@ func main() {
     http.ListenAndServe(":8080", nil)
 }
 
-type JsonResponse map[string]interface{}
+type JsonString map[string]interface{}
 
-func (r JsonResponse) String() (s string) {
+func (r JsonString) String() (s string) {
     b, err := json.Marshal(r)
     if err != nil {
         s = ""
@@ -59,35 +59,9 @@ func (r JsonResponse) String() (s string) {
     return
 }
 
-func getLogin(rw http.ResponseWriter, req *http.Request) {
-    err := tpls.ExecuteTemplate(rw, "login.html", ctx)
-    if err != nil {
-        http.Error(rw, err.Error(), http.StatusInternalServerError)
-    }
-}
-
-func postLogin(rw http.ResponseWriter, req *http.Request) {
-    rw.Header().Set("Content-Type", "application/json")
-    fmt.Fprint(rw, JsonResponse{"status": "success", "time": time.Now().Format(time.ANSIC)})
-    return
-}
-
-func handleApiRoot(rw http.ResponseWriter, req *http.Request) {
-    rw.Header().Set("Content-Type", "application/json")
-    var status = "active"
-    defer fmt.Fprint(rw, JsonResponse{
-            "status": status,
-            "time": time.Now().Format(time.ANSIC),
-            "username": username})
-    if username == "" {
-        status = "unauthenticated"
-    }
-    return
-}
-
 type handler func(rw http.ResponseWriter, req *http.Request)
 
-func jsonResponse (Decored handler) handler {
+func jsonResponse(Decored handler) handler {
     return func(rw http.ResponseWriter, req *http.Request) {
         var (
             status string = "success"
@@ -99,11 +73,38 @@ func jsonResponse (Decored handler) handler {
                 status = "fail"
                 reason = r.(string)
             }
-            fmt.Fprint(rw, JsonResponse{"status": status, "reason": reason})
+            fmt.Fprint(rw, JsonString{"status": status, "reason": reason})
         }()
         Decored(rw, req)
     }
 }
+
+func getLogin(rw http.ResponseWriter, req *http.Request) {
+    err := tpls.ExecuteTemplate(rw, "login.html", ctx)
+    if err != nil {
+        http.Error(rw, err.Error(), http.StatusInternalServerError)
+    }
+}
+
+func postLogin(rw http.ResponseWriter, req *http.Request) {
+    rw.Header().Set("Content-Type", "application/json")
+    fmt.Fprint(rw, JsonString{"status": "success", "time": time.Now().Format(time.ANSIC)})
+    return
+}
+
+func handleApiRoot(rw http.ResponseWriter, req *http.Request) {
+    rw.Header().Set("Content-Type", "application/json")
+    var status = "active"
+    defer fmt.Fprint(rw, JsonString{
+            "status": status,
+            "time": time.Now().Format(time.ANSIC),
+            "username": username})
+    if username == "" {
+        status = "unauthenticated"
+    }
+    return
+}
+
 func handleApiCreate(rw http.ResponseWriter, req *http.Request) {
     var (
         vars = mux.Vars(req)
@@ -130,80 +131,47 @@ func handleApiCreate(rw http.ResponseWriter, req *http.Request) {
     } else {
         panic("File exists.")
     }
-    return
 }
 
 func handleApiMove(rw http.ResponseWriter, req *http.Request) {
-    var (
-        data map[string]interface{}
-        reason string = ""
-        status string = "success"
-    )
+    var data map[string]interface{}
     if req.Body == nil {
-        status = "fail"
-        reason = "No request body."
-    } else {
-        if req.Body == nil {
-            return
-        }
-        body, err := ioutil.ReadAll(req.Body)
-        req.Body.Close()
-
-        err = json.Unmarshal(body, &data)
-        if err != nil {
-            reason = err.Error()
-            status = "fail"
-        } else {
-            if src, oks := data["src"].(string); oks {
-                if dst, okd := data["dst"].(string); okd {
-                    path := fileroot + "/" + username + "/" + src
-                    dstpath := fileroot + "/" + username + "/" + dst
-                    if _, err = os.Stat(path); err == nil {
-                        err = os.MkdirAll(filepath.Dir(dstpath), 0740)
-                        if err != nil {
-                            reason = err.Error()
-                            status = "fail"
-                        } else {
-                            err = os.Rename(path, dstpath)
-                            if err != nil {
-                                reason = err.Error()
-                                status = "fail"
-                            }
-                        }
-                    } else {
-                        reason = "File doesn't exist."
-                        status = "fail"
-                    }
-                } else {
-                    reason = "Invalid json."
-                    status = "fail"
-                }
-            } else {
-                reason = "Invalid json."
-                status = "fail"
-            }
-        }
+        panic("No request body.")
     }
-    rw.Header().Set("Content-Type", "application/json")
-    fmt.Fprint(rw, JsonResponse{"status": status, "reason": reason})
-    return
+    body, err := ioutil.ReadAll(req.Body)
+    defer req.Body.Close()
+
+    if err = json.Unmarshal(body, &data); err != nil {
+        panic(err.Error())
+    }
+    src, oks := data["src"].(string)
+    dst, okd := data["dst"].(string)
+    if !oks || !okd {
+        panic("Invalid json.")
+    }
+
+    path := fileroot + "/" + username + "/" + src
+    dstpath := fileroot + "/" + username + "/" + dst
+
+    if _, err = os.Stat(path); err != nil {
+        panic(err.Error())
+    }
+    if _, err = os.Stat(dstpath); !os.IsNotExist(err) {
+        panic("Overwriting destination file.")
+    }
+    if err = os.MkdirAll(filepath.Dir(dstpath), 0740); err != nil {
+        panic(err.Error())
+    }
+    if err = os.Rename(path, dstpath); err != nil {
+        panic(err.Error())
+    }
 }
 
 func handleApiRemove(rw http.ResponseWriter, req *http.Request) {
-    var (
-        vars = mux.Vars(req)
-        status string = "success"
-        reason string = ""
-        path = fileroot + "/" + username + "/" + vars["path"]
-    )
-    err := os.Remove(path)
-    if err != nil {
-        status = "fail"
-        reason = err.Error()
+    var path = fileroot + "/" + username + "/" + mux.Vars(req)["path"]
+    if err := os.Remove(path); err != nil {
+        panic(err.Error())
     }
-    rw.Header().Set("Content-Type", "application/json")
-    fmt.Fprint(rw, JsonResponse{"status": status, "reason": reason})
-    return
 }
 
 func handleApiModify(rw http.ResponseWriter, req *http.Request) {
@@ -232,7 +200,7 @@ func handleApiModify(rw http.ResponseWriter, req *http.Request) {
         reason = err.Error()
     }
     rw.Header().Set("Content-Type", "application/json")
-    fmt.Fprint(rw, JsonResponse{"status": status, "reason": reason})
+    fmt.Fprint(rw, JsonString{"status": status, "reason": reason})
     return
 }
 
@@ -261,11 +229,11 @@ func handleApiDownload(rw http.ResponseWriter, req *http.Request) {
     }
 }
 
-func scanDir(root string, recurse bool) (items []JsonResponse, err error) {
+func scanDir(root string, recurse bool) (items []JsonString, err error) {
     type finfo struct {
         name string
         t string
-        items []JsonResponse
+        items []JsonString
     }
     var files []os.FileInfo
 
@@ -287,9 +255,9 @@ func scanDir(root string, recurse bool) (items []JsonResponse, err error) {
             fstruct.t = "f"
         }
         if recurse {
-            items = append(items, JsonResponse{"name": fstruct.name, "t": fstruct.t, "items": fstruct.items})
+            items = append(items, JsonString{"name": fstruct.name, "t": fstruct.t, "items": fstruct.items})
         } else {
-            items = append(items, JsonResponse{"name": fstruct.name, "t": fstruct.t})
+            items = append(items, JsonString{"name": fstruct.name, "t": fstruct.t})
         }
     }
     return items, nil
@@ -300,7 +268,7 @@ func handleApiList(rw http.ResponseWriter, req *http.Request) {
         vars = mux.Vars(req)
         status string = "success"
         reason string = ""
-        items []JsonResponse
+        items []JsonString
         path = fileroot + "/" + username + "/" + vars["path"]
     )
 
@@ -320,7 +288,7 @@ func handleApiList(rw http.ResponseWriter, req *http.Request) {
         reason = err.Error()
     }
     rw.Header().Set("Content-Type", "application/json")
-    fmt.Fprint(rw, JsonResponse{"status": status, "reason": reason, "items": items})
+    fmt.Fprint(rw, JsonString{"status": status, "reason": reason, "items": items})
     return
 }
 
@@ -329,7 +297,7 @@ func handleApiTree(rw http.ResponseWriter, req *http.Request) {
         vars = mux.Vars(req)
         status string = "success"
         reason string = ""
-        items []JsonResponse
+        items []JsonString
         path = fileroot + "/" + username + "/" + vars["path"]
     )
 
@@ -349,6 +317,6 @@ func handleApiTree(rw http.ResponseWriter, req *http.Request) {
         reason = err.Error()
     }
     rw.Header().Set("Content-Type", "application/json")
-    fmt.Fprint(rw, JsonResponse{"status": status, "reason": reason, "items": items})
+    fmt.Fprint(rw, JsonString{"status": status, "reason": reason, "items": items})
     return
 }
