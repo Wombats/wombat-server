@@ -35,7 +35,7 @@ func main() {
 
     // API
     r.HandleFunc(apiroot + "/", handleApiRoot).Methods("GET")
-    r.HandleFunc(apiroot + "/create/{path:.*}", handleApiCreate).Methods("POST")
+    r.HandleFunc(apiroot + "/create/{path:.*}", jsonResponse(handleApiCreate)).Methods("POST")
     r.HandleFunc(apiroot + "/move", handleApiMove).Methods("POST")
     r.HandleFunc(apiroot + "/delete/{path:.*}", handleApiRemove).Methods("POST")
     r.HandleFunc(apiroot + "/modify/{path:.*}", handleApiModify).Methods("POST")
@@ -74,43 +74,62 @@ func postLogin(rw http.ResponseWriter, req *http.Request) {
 
 func handleApiRoot(rw http.ResponseWriter, req *http.Request) {
     rw.Header().Set("Content-Type", "application/json")
-    fmt.Fprint(rw, JsonResponse{"status": "active", "time": time.Now().Format(time.ANSIC)})
+    var status = "active"
+    defer fmt.Fprint(rw, JsonResponse{
+            "status": status,
+            "time": time.Now().Format(time.ANSIC),
+            "username": username})
+    if username == "" {
+        status = "unauthenticated"
+    }
     return
 }
 
+type handler func(rw http.ResponseWriter, req *http.Request)
+
+func jsonResponse (Decored handler) handler {
+    return func(rw http.ResponseWriter, req *http.Request) {
+        var (
+            status string = "success"
+            reason string
+        )
+        defer func() {
+            rw.Header().Set("Content-Type", "application/json")
+            if r := recover(); r != nil {
+                status = "fail"
+                reason = r.(string)
+            }
+            fmt.Fprint(rw, JsonResponse{"status": status, "reason": reason})
+        }()
+        Decored(rw, req)
+    }
+}
 func handleApiCreate(rw http.ResponseWriter, req *http.Request) {
     var (
         vars = mux.Vars(req)
-        status string = "success"
-        reason string = ""
         path = fileroot + "/" + username + "/" + vars["path"]
     )
 
     // TODO: Sanitize path, so users can't write to places they shouldn't
     if _, err := os.Stat(path); os.IsNotExist(err) {
         if req.Body == nil {
-            return
+            panic("No request body provided.")
         }
         body, err := ioutil.ReadAll(req.Body)
-        req.Body.Close()
-
-        err = os.MkdirAll(filepath.Dir(path), 0740)
+        defer req.Body.Close()
         if err != nil {
-            reason = err.Error()
-            status = "fail"
-        } else {
-            err = ioutil.WriteFile(path, body, 0740)
-            if err != nil {
-                reason = err.Error()
-                status = "fail"
-            }
+            panic(err.Error())
+        }
+
+        if err = os.MkdirAll(filepath.Dir(path), 0740); err != nil {
+            panic(err.Error())
+        }
+        if err = ioutil.WriteFile(path, body, 0740); err != nil {
+            panic(err.Error())
         }
     } else {
-        status = "fail"
-        reason = "File exists."
+        panic("File exists.")
     }
-    rw.Header().Set("Content-Type", "application/json")
-    fmt.Fprint(rw, JsonResponse{"status": status, "reason": reason})
     return
 }
 
