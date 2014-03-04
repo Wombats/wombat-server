@@ -34,14 +34,14 @@ func main() {
     http.Handle("/static/", http.StripPrefix("/static", http.FileServer(http.Dir("static"))))
 
     // API
-    r.HandleFunc(apiroot + "/", handleApiRoot).Methods("GET")
-    r.HandleFunc(apiroot + "/create/{path:.*}", jsonResponse(handleApiCreate)).Methods("POST")
-    r.HandleFunc(apiroot + "/move", jsonResponse(handleApiMove)).Methods("POST")
-    r.HandleFunc(apiroot + "/delete/{path:.*}", jsonResponse(handleApiRemove)).Methods("POST")
-    r.HandleFunc(apiroot + "/modify/{path:.*}", handleApiModify).Methods("POST")
-    r.HandleFunc(apiroot + "/download/{path:.*}", handleApiDownload).Methods("GET")
-    r.HandleFunc(apiroot + "/list/{path:.*}", handleApiList).Methods("GET")
-    r.HandleFunc(apiroot + "/tree/{path:.*}", handleApiTree).Methods("GET")
+    r.HandleFunc(apiroot + "/",                     handleApiRoot).Methods("GET")
+    r.HandleFunc(apiroot + "/create/{path:.*}",     jsonResponse(handleApiCreate)).Methods("POST")
+    r.HandleFunc(apiroot + "/move",                 jsonResponse(handleApiMove)).Methods("POST")
+    r.HandleFunc(apiroot + "/delete/{path:.*}",     jsonResponse(handleApiRemove)).Methods("POST")
+    r.HandleFunc(apiroot + "/modify/{path:.*}",     jsonResponse(handleApiModify)).Methods("POST")
+    r.HandleFunc(apiroot + "/download/{path:.*}",   handleApiDownload).Methods("GET")
+    r.HandleFunc(apiroot + "/list/{path:.*}",       handleApiList).Methods("GET")
+    r.HandleFunc(apiroot + "/tree/{path:.*}",       handleApiTree).Methods("GET")
 
     http.Handle("/", r)
     http.ListenAndServe(":8080", nil)
@@ -76,6 +76,12 @@ func jsonResponse(Decored handler) handler {
             fmt.Fprint(rw, JsonString{"status": status, "reason": reason})
         }()
         Decored(rw, req)
+    }
+}
+
+func ifErrPanic(e error) {
+    if e != nil {
+        panic(e.Error())
     }
 }
 
@@ -118,16 +124,10 @@ func handleApiCreate(rw http.ResponseWriter, req *http.Request) {
         }
         body, err := ioutil.ReadAll(req.Body)
         defer req.Body.Close()
-        if err != nil {
-            panic(err.Error())
-        }
+        ifErrPanic(err);
 
-        if err = os.MkdirAll(filepath.Dir(path), 0740); err != nil {
-            panic(err.Error())
-        }
-        if err = ioutil.WriteFile(path, body, 0740); err != nil {
-            panic(err.Error())
-        }
+        ifErrPanic(os.MkdirAll(filepath.Dir(path), 0740))
+        ifErrPanic(ioutil.WriteFile(path, body, 0740))
     } else {
         panic("File exists.")
     }
@@ -141,9 +141,7 @@ func handleApiMove(rw http.ResponseWriter, req *http.Request) {
     body, err := ioutil.ReadAll(req.Body)
     defer req.Body.Close()
 
-    if err = json.Unmarshal(body, &data); err != nil {
-        panic(err.Error())
-    }
+    ifErrPanic(json.Unmarshal(body, &data))
     src, oks := data["src"].(string)
     dst, okd := data["dst"].(string)
     if !oks || !okd {
@@ -159,49 +157,26 @@ func handleApiMove(rw http.ResponseWriter, req *http.Request) {
     if _, err = os.Stat(dstpath); !os.IsNotExist(err) {
         panic("Overwriting destination file.")
     }
-    if err = os.MkdirAll(filepath.Dir(dstpath), 0740); err != nil {
-        panic(err.Error())
-    }
-    if err = os.Rename(path, dstpath); err != nil {
-        panic(err.Error())
-    }
+    ifErrPanic(os.MkdirAll(filepath.Dir(dstpath), 0740))
+    ifErrPanic(os.Rename(path, dstpath))
 }
 
 func handleApiRemove(rw http.ResponseWriter, req *http.Request) {
     var path = fileroot + "/" + username + "/" + mux.Vars(req)["path"]
-    if err := os.Remove(path); err != nil {
-        panic(err.Error())
-    }
+    ifErrPanic(os.Remove(path))
 }
 
 func handleApiModify(rw http.ResponseWriter, req *http.Request) {
-    var (
-        vars = mux.Vars(req)
-        status string = "success"
-        reason string = ""
-        path = fileroot + "/" + username + "/" + vars["path"]
-    )
-
+    var path = fileroot + "/" + username + "/" + mux.Vars(req)["path"]
     // TODO: Sanitize path, so users can't write to places they shouldn't
-    if _, err := os.Stat(path); err == nil {
-        if req.Body == nil {
-            return
-        }
-        body, err := ioutil.ReadAll(req.Body)
-        req.Body.Close()
 
-        err = ioutil.WriteFile(path, body, 0740)
-        if err != nil {
-            reason = err.Error()
-            status = "fail"
-        }
-    } else {
-        status = "fail"
-        reason = err.Error()
-    }
-    rw.Header().Set("Content-Type", "application/json")
-    fmt.Fprint(rw, JsonString{"status": status, "reason": reason})
-    return
+    if _, err := os.Stat(path); err != nil { panic(err.Error()) }
+
+    body, err := ioutil.ReadAll(req.Body)
+    defer req.Body.Close()
+    if err != nil { panic(err.Error()) }
+
+    ifErrPanic(ioutil.WriteFile(path, body, 0740))
 }
 
 func handleApiDownload(rw http.ResponseWriter, req *http.Request) {
