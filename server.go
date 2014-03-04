@@ -38,6 +38,7 @@ func main() {
     r.HandleFunc(apiroot + "/create/{path:.*}", handleApiCreate).Methods("POST")
     r.HandleFunc(apiroot + "/move", handleApiMove).Methods("POST")
     r.HandleFunc(apiroot + "/delete/{path:.*}", handleApiRemove).Methods("POST")
+    r.HandleFunc(apiroot + "/modify/{path:.*}", handleApiModify).Methods("POST")
 
 
     http.Handle("/", r)
@@ -176,6 +177,36 @@ func handleApiRemove(rw http.ResponseWriter, req *http.Request) {
     )
     err := os.Remove(path)
     if err != nil {
+        status = "fail"
+        reason = err.Error()
+    }
+    rw.Header().Set("Content-Type", "application/json")
+    fmt.Fprint(rw, JsonResponse{"status": status, "reason": reason})
+    return
+}
+
+func handleApiModify(rw http.ResponseWriter, req *http.Request) {
+    var (
+        vars = mux.Vars(req)
+        status string = "success"
+        reason string = ""
+        path = fileroot + "/" + username + "/" + vars["path"]
+    )
+
+    // TODO: Sanitize path, so users can't write to places they shouldn't
+    if _, err := os.Stat(path); err == nil {
+        if req.Body == nil {
+            return
+        }
+        body, err := ioutil.ReadAll(req.Body)
+        req.Body.Close()
+
+        err = ioutil.WriteFile(path, body, 0740)
+        if err != nil {
+            reason = err.Error()
+            status = "fail"
+        }
+    } else {
         status = "fail"
         reason = err.Error()
     }
