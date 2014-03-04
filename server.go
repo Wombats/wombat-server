@@ -37,6 +37,7 @@ func main() {
     r.HandleFunc(apiroot + "/", handleApiRoot).Methods("GET")
     r.HandleFunc(apiroot + "/create/{path:.*}", handleApiCreate).Methods("POST")
     r.HandleFunc(apiroot + "/move", handleApiMove).Methods("POST")
+    r.HandleFunc(apiroot + "/delete/{path:.*}", handleApiRemove).Methods("POST")
 
 
     http.Handle("/", r)
@@ -160,6 +161,23 @@ func handleApiMove(rw http.ResponseWriter, req *http.Request) {
                 status = "fail"
             }
         }
+    }
+    rw.Header().Set("Content-Type", "application/json")
+    fmt.Fprint(rw, JsonResponse{"status": status, "reason": reason})
+    return
+}
+
+func handleApiRemove(rw http.ResponseWriter, req *http.Request) {
+    var (
+        vars = mux.Vars(req)
+        status string = "success"
+        reason string = ""
+        path = fileroot + "/" + username + "/" + vars["path"]
+    )
+    err := os.Remove(path)
+    if err != nil {
+        status = "fail"
+        reason = err.Error()
     }
     rw.Header().Set("Content-Type", "application/json")
     fmt.Fprint(rw, JsonResponse{"status": status, "reason": reason})
