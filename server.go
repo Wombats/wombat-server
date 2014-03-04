@@ -27,6 +27,8 @@ var (
 func main() {
     fmt.Println("Starting server on port 8080.")
     r := mux.NewRouter()
+
+    // Pages
     r.HandleFunc("/login", getLogin).Methods("GET")
     r.HandleFunc("/login", postLogin).Methods("POST")
 
