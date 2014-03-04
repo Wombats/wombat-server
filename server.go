@@ -79,7 +79,7 @@ func jsonResponse(Decored handler) handler {
     }
 }
 
-func ifErrPanic(e error) {
+func panicIfErr(e error) {
     if e != nil {
         panic(e.Error())
     }
@@ -124,10 +124,10 @@ func handleApiCreate(rw http.ResponseWriter, req *http.Request) {
         }
         body, err := ioutil.ReadAll(req.Body)
         defer req.Body.Close()
-        ifErrPanic(err);
+        panicIfErr(err);
 
-        ifErrPanic(os.MkdirAll(filepath.Dir(path), 0740))
-        ifErrPanic(ioutil.WriteFile(path, body, 0740))
+        panicIfErr(os.MkdirAll(filepath.Dir(path), 0740))
+        panicIfErr(ioutil.WriteFile(path, body, 0740))
     } else {
         panic("File exists.")
     }
@@ -141,7 +141,7 @@ func handleApiMove(rw http.ResponseWriter, req *http.Request) {
     body, err := ioutil.ReadAll(req.Body)
     defer req.Body.Close()
 
-    ifErrPanic(json.Unmarshal(body, &data))
+    panicIfErr(json.Unmarshal(body, &data))
     src, oks := data["src"].(string)
     dst, okd := data["dst"].(string)
     if !oks || !okd {
@@ -157,13 +157,13 @@ func handleApiMove(rw http.ResponseWriter, req *http.Request) {
     if _, err = os.Stat(dstpath); !os.IsNotExist(err) {
         panic("Overwriting destination file.")
     }
-    ifErrPanic(os.MkdirAll(filepath.Dir(dstpath), 0740))
-    ifErrPanic(os.Rename(path, dstpath))
+    panicIfErr(os.MkdirAll(filepath.Dir(dstpath), 0740))
+    panicIfErr(os.Rename(path, dstpath))
 }
 
 func handleApiRemove(rw http.ResponseWriter, req *http.Request) {
     var path = fileroot + "/" + username + "/" + mux.Vars(req)["path"]
-    ifErrPanic(os.Remove(path))
+    panicIfErr(os.Remove(path))
 }
 
 func handleApiModify(rw http.ResponseWriter, req *http.Request) {
@@ -176,7 +176,7 @@ func handleApiModify(rw http.ResponseWriter, req *http.Request) {
     defer req.Body.Close()
     if err != nil { panic(err.Error()) }
 
-    ifErrPanic(ioutil.WriteFile(path, body, 0740))
+    panicIfErr(ioutil.WriteFile(path, body, 0740))
 }
 
 func handleApiDownload(rw http.ResponseWriter, req *http.Request) {
@@ -237,61 +237,33 @@ func scanDir(root string, recurse bool) (items []JsonString, err error) {
     }
     return items, nil
 }
-
-func handleApiList(rw http.ResponseWriter, req *http.Request) {
+func handleWalkDir(rw http.ResponseWriter, req *http.Request, recurse bool) {
     var (
         vars = mux.Vars(req)
         status string = "success"
-        reason string = ""
+        reason string
         items []JsonString
         path = fileroot + "/" + username + "/" + vars["path"]
     )
-
-    if fi, err := os.Stat(path); err == nil {
-        if fi.Mode().IsDir() {
-            items, err = scanDir(path, false)
-            if err != nil {
-                status = "fail"
-                reason = err.Error()
-            }
-        } else {
+    defer func() {
+        if r := recover(); r != nil {
             status = "fail"
-            reason = "Not a directory."
+            reason = r.(string)
         }
+        rw.Header().Set("Content-Type", "application/json")
+        fmt.Fprint(rw, JsonString{"status": status, "reason": reason, "items": items})
+    }()
+
+    if fi, err := os.Stat(path); err != nil {
+        panic(err.Error())
     } else {
-        status = "fail"
-        reason = err.Error()
+        if !fi.Mode().IsDir() { panic("Not a directory.") }
     }
-    rw.Header().Set("Content-Type", "application/json")
-    fmt.Fprint(rw, JsonString{"status": status, "reason": reason, "items": items})
-    return
+
+    items, err := scanDir(path, recurse);
+    panicIfErr(err)
 }
 
-func handleApiTree(rw http.ResponseWriter, req *http.Request) {
-    var (
-        vars = mux.Vars(req)
-        status string = "success"
-        reason string = ""
-        items []JsonString
-        path = fileroot + "/" + username + "/" + vars["path"]
-    )
+func handleApiList(rw http.ResponseWriter, req *http.Request) { handleWalkDir(rw, req, false) }
 
-    if fi, err := os.Stat(path); err == nil {
-        if fi.Mode().IsDir() {
-            items, err = scanDir(path, true)
-            if err != nil {
-                status = "fail"
-                reason = err.Error()
-            }
-        } else {
-            status = "fail"
-            reason = "Not a directory."
-        }
-    } else {
-        status = "fail"
-        reason = err.Error()
-    }
-    rw.Header().Set("Content-Type", "application/json")
-    fmt.Fprint(rw, JsonString{"status": status, "reason": reason, "items": items})
-    return
-}
+func handleApiTree(rw http.ResponseWriter, req *http.Request) { handleWalkDir(rw, req, true) }
