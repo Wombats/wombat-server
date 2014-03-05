@@ -5,15 +5,23 @@ import (
     "net/http"
     "html/template"
     "encoding/json"
+    "encoding/gob"
     "time"
     "io/ioutil"
     "os"
     "path/filepath"
     "github.com/gorilla/mux"
+    "github.com/gorilla/sessions"
+    "github.com/gorilla/context"
 )
 
 type SiteData struct {
     Root string
+}
+type UserData struct {
+    username string
+    hash string
+    email string
 }
 
 var (
@@ -21,29 +29,32 @@ var (
     ctx SiteData = SiteData{Root: "localhost"}
     tpls = template.Must(template.ParseFiles("tpls/login.html"))
     fileroot string = "files"
-    username string = "apexskier"
+    cookiejar = sessions.NewCookieStore([]byte("wombat-secret-key"))
+    authstore = sessions.NewFilesystemStore("data/auth.gob", []byte("wombat-secret-key-2"))
 )
 
 func main() {
     fmt.Println("Starting server on port 8080.")
     r := mux.NewRouter()
 
+    gob.Register(&UserData{})
+
     // Pages
     r.HandleFunc("/login", getLogin).Methods("GET")
-    r.HandleFunc("/login", postLogin).Methods("POST")
+    r.HandleFunc("/login", jsonResponse(postLogin)).Methods("POST")
 
     // Static files
     http.Handle("/static/", http.StripPrefix("/static", http.FileServer(http.Dir("static"))))
 
     // API
-    r.HandleFunc(apiroot + "/",                     handleApiRoot).Methods("GET")
-    r.HandleFunc(apiroot + "/create/{path:.*}",     jsonResponse(handleApiCreate)).Methods("POST")
-    r.HandleFunc(apiroot + "/move",                 jsonResponse(handleApiMove)).Methods("POST")
-    r.HandleFunc(apiroot + "/delete/{path:.*}",     jsonResponse(handleApiRemove)).Methods("POST")
-    r.HandleFunc(apiroot + "/modify/{path:.*}",     jsonResponse(handleApiModify)).Methods("POST")
-    r.HandleFunc(apiroot + "/download/{path:.*}",   handleApiDownload).Methods("GET")
-    r.HandleFunc(apiroot + "/list/{path:.*}",       handleApiList).Methods("GET")
-    r.HandleFunc(apiroot + "/tree/{path:.*}",       handleApiTree).Methods("GET")
+    r.HandleFunc(apiroot + "/",                     authorize(handleApiRoot)).Methods("GET")
+    r.HandleFunc(apiroot + "/create/{path:.*}",     authorize(jsonResponse(handleApiCreate))).Methods("POST")
+    r.HandleFunc(apiroot + "/move",                 authorize(jsonResponse(handleApiMove))).Methods("POST")
+    r.HandleFunc(apiroot + "/delete/{path:.*}",     authorize(jsonResponse(handleApiRemove))).Methods("POST")
+    r.HandleFunc(apiroot + "/modify/{path:.*}",     authorize(jsonResponse(handleApiModify))).Methods("POST")
+    r.HandleFunc(apiroot + "/download/{path:.*}",   authorize(handleApiDownload)).Methods("GET")
+    r.HandleFunc(apiroot + "/list/{path:.*}",       authorize(handleApiList)).Methods("GET")
+    r.HandleFunc(apiroot + "/tree/{path:.*}",       authorize(handleApiTree)).Methods("GET")
 
     http.Handle("/", r)
     http.ListenAndServe(":8080", nil)
@@ -81,10 +92,28 @@ func jsonResponse(Decored handler) handler {
     }
 }
 
+func authorize(Decored handler) handler {
+    return func(rw http.ResponseWriter, req *http.Request) {
+        session, err := cookiejar.Get(req, "auth")
+        panicIfErr(err);
+        username := session.Values["username"]
+        if username == nil {
+            http.Error(rw, "You must login to do that.", http.StatusUnauthorized)
+            return
+        }
+        context.Set(req, "username", username)
+        Decored(rw, req)
+    }
+}
+
 func panicIfErr(e error) {
     if e != nil {
         panic(e.Error())
     }
+}
+
+func getDstPath(req *http.Request) string {
+    return fileroot + "/" + context.Get(req, "username").(string) + "/" + mux.Vars(req)["path"]
 }
 
 func getLogin(rw http.ResponseWriter, req *http.Request) {
@@ -95,8 +124,12 @@ func getLogin(rw http.ResponseWriter, req *http.Request) {
 }
 
 func postLogin(rw http.ResponseWriter, req *http.Request) {
-    rw.Header().Set("Content-Type", "application/json")
-    fmt.Fprint(rw, JsonString{"status": "success", "time": time.Now().Format(time.ANSIC)})
+    panicIfErr(req.ParseForm())
+    username := req.PostFormValue("username")
+    session, _ := cookiejar.Get(req, "auth")
+    session.Values["username"] = username
+    panicIfErr(session.Save(req, rw))
+    http.Redirect(rw, req, "/api", http.StatusAccepted)
     return
 }
 
@@ -106,18 +139,12 @@ func handleApiRoot(rw http.ResponseWriter, req *http.Request) {
     defer fmt.Fprint(rw, JsonString{
             "status": status,
             "time": time.Now().Format(time.ANSIC),
-            "username": username})
-    if username == "" {
-        status = "unauthenticated"
-    }
+            "username": context.Get(req, "username")})
     return
 }
 
 func handleApiCreate(rw http.ResponseWriter, req *http.Request) {
-    var (
-        vars = mux.Vars(req)
-        path = fileroot + "/" + username + "/" + vars["path"]
-    )
+    var path = getDstPath(req)
 
     // TODO: Sanitize path, so users can't write to places they shouldn't
     if _, err := os.Stat(path); os.IsNotExist(err) {
@@ -136,7 +163,11 @@ func handleApiCreate(rw http.ResponseWriter, req *http.Request) {
 }
 
 func handleApiMove(rw http.ResponseWriter, req *http.Request) {
-    var data map[string]interface{}
+    var (
+        data map[string]interface{}
+        username string = context.Get(req, "username").(string)
+    )
+
     if req.Body == nil {
         panic("No request body.")
     }
@@ -149,7 +180,6 @@ func handleApiMove(rw http.ResponseWriter, req *http.Request) {
     if !oks || !okd {
         panic("Invalid json.")
     }
-
     path := fileroot + "/" + username + "/" + src
     dstpath := fileroot + "/" + username + "/" + dst
 
@@ -164,12 +194,12 @@ func handleApiMove(rw http.ResponseWriter, req *http.Request) {
 }
 
 func handleApiRemove(rw http.ResponseWriter, req *http.Request) {
-    var path = fileroot + "/" + username + "/" + mux.Vars(req)["path"]
+    var path = getDstPath(req)
     panicIfErr(os.Remove(path))
 }
 
 func handleApiModify(rw http.ResponseWriter, req *http.Request) {
-    var path = fileroot + "/" + username + "/" + mux.Vars(req)["path"]
+    var path = getDstPath(req)
     // TODO: Sanitize path, so users can't write to places they shouldn't
 
     if _, err := os.Stat(path); err != nil { panic(err.Error()) }
@@ -182,10 +212,7 @@ func handleApiModify(rw http.ResponseWriter, req *http.Request) {
 }
 
 func handleApiDownload(rw http.ResponseWriter, req *http.Request) {
-    var (
-        vars = mux.Vars(req)
-        path = fileroot + "/" + username + "/" + vars["path"]
-    )
+    var path = getDstPath(req)
 
     // TODO: Sanitize path, so users can't write to places they shouldn't
     if _, err := os.Stat(path); os.IsNotExist(err) {
@@ -241,11 +268,10 @@ func scanDir(root string, recurse bool) (items []JsonString, err error) {
 }
 func handleWalkDir(rw http.ResponseWriter, req *http.Request, recurse bool) {
     var (
-        vars = mux.Vars(req)
         status string = "success"
         reason string
         items []JsonString
-        path = fileroot + "/" + username + "/" + vars["path"]
+        path = getDstPath(req)
     )
     defer func() {
         if r := recover(); r != nil {
