@@ -2,11 +2,9 @@ package main
 
 import (
     "fmt"
-    "errors"
     "net/http"
     "html/template"
     "encoding/json"
-    "encoding/gob"
     "time"
     "io/ioutil"
     "os"
@@ -18,66 +16,6 @@ import (
 
 type SiteData struct {
     Root string
-}
-type UserData struct {
-    username string
-    hash string
-    email string
-}
-type Authorizer struct {
-    users map[string]UserData
-    filepath string
-}
-func NewAuthorizer(fpath string) Authorizer {
-    var a Authorizer
-    if _, err := os.Stat(fpath); err != nil {
-        panic(err.Error())
-    }
-    f, err := os.Open(fpath)
-    defer f.Close()
-    if err != nil {
-        panic(err.Error())
-    }
-    dec := gob.NewDecoder(f)
-    dec.Decode(&a.users)
-    if a.users == nil {
-        a.users = make(map[string]UserData)
-    }
-    a.filepath = fpath
-    fmt.Println(a)
-    return a
-}
-func (a Authorizer) Save(u UserData) error {
-    if _, ok := a.users[u.username]; ok {
-        return errors.New("User already exists.")
-    }
-    a.users[u.username] = u
-
-    f, err := os.Create("data/auth")
-    defer f.Close()
-    if err != nil {
-        fmt.Println("No auth file found.")
-        panic("No file.")
-    }
-    enc := gob.NewEncoder(f)
-    fmt.Println(a.users)
-    err = enc.Encode(a.users)
-    return nil
-}
-func (a Authorizer) Login(u string, p string) error {
-    err := a.Save(UserData{u, u + p, ""})
-    if err != nil {
-        return err
-    }
-    if user, ok := a.users[u]; !ok {
-        return errors.New("User not found.")
-    } else {
-        hash := u + p
-        if user.hash != hash {
-            return errors.New("Password doesn't match.")
-        }
-    }
-    return nil
 }
 
 var (
@@ -93,8 +31,6 @@ var (
 func main() {
     fmt.Println("Starting server on port 8080.")
     r := mux.NewRouter()
-
-    gob.Register(&UserData{})
 
     // Pages
     r.HandleFunc("/login", getLogin).Methods("GET")
