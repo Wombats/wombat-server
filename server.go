@@ -2,6 +2,7 @@ package main
 
 import (
     "fmt"
+    "errors"
     "net/http"
     "html/template"
     "encoding/json"
@@ -23,6 +24,61 @@ type UserData struct {
     hash string
     email string
 }
+type Authorizer struct {
+    users map[string]UserData
+    filepath string
+}
+func NewAuthorizer(fpath string) Authorizer {
+    var a Authorizer
+    if _, err := os.Stat(fpath); err != nil {
+        panic(err.Error())
+    }
+    f, err := os.Open(fpath)
+    defer f.Close()
+    if err != nil {
+        panic(err.Error())
+    }
+    dec := gob.NewDecoder(f)
+    dec.Decode(&a.users)
+    if a.users == nil {
+        a.users = make(map[string]UserData)
+    }
+    a.filepath = fpath
+    fmt.Println(a)
+    return a
+}
+func (a Authorizer) Save(u UserData) error {
+    if _, ok := a.users[u.username]; ok {
+        return errors.New("User already exists.")
+    }
+    a.users[u.username] = u
+
+    f, err := os.Create("data/auth")
+    defer f.Close()
+    if err != nil {
+        fmt.Println("No auth file found.")
+        panic("No file.")
+    }
+    enc := gob.NewEncoder(f)
+    fmt.Println(a.users)
+    err = enc.Encode(a.users)
+    return nil
+}
+func (a Authorizer) Login(u string, p string) error {
+    err := a.Save(UserData{u, u + p, ""})
+    if err != nil {
+        return err
+    }
+    if user, ok := a.users[u]; !ok {
+        return errors.New("User not found.")
+    } else {
+        hash := u + p
+        if user.hash != hash {
+            return errors.New("Password doesn't match.")
+        }
+    }
+    return nil
+}
 
 var (
     apiroot string = "/api"
@@ -31,6 +87,7 @@ var (
     fileroot string = "files"
     cookiejar = sessions.NewCookieStore([]byte("wombat-secret-key"))
     authstore = sessions.NewFilesystemStore("data/auth.gob", []byte("wombat-secret-key-2"))
+    aaa Authorizer = NewAuthorizer("data/auth")
 )
 
 func main() {
@@ -47,6 +104,7 @@ func main() {
     http.Handle("/static/", http.StripPrefix("/static", http.FileServer(http.Dir("static"))))
 
     // API
+    r.HandleFunc(apiroot, addSlash);
     r.HandleFunc(apiroot + "/",                     authorize(handleApiRoot)).Methods("GET")
     r.HandleFunc(apiroot + "/create/{path:.*}",     authorize(jsonResponse(handleApiCreate))).Methods("POST")
     r.HandleFunc(apiroot + "/move",                 authorize(jsonResponse(handleApiMove))).Methods("POST")
@@ -55,6 +113,8 @@ func main() {
     r.HandleFunc(apiroot + "/download/{path:.*}",   authorize(handleApiDownload)).Methods("GET")
     r.HandleFunc(apiroot + "/list/{path:.*}",       authorize(handleApiList)).Methods("GET")
     r.HandleFunc(apiroot + "/tree/{path:.*}",       authorize(handleApiTree)).Methods("GET")
+
+    r.StrictSlash(false)
 
     http.Handle("/", r)
     http.ListenAndServe(":8080", nil)
@@ -116,6 +176,10 @@ func getDstPath(req *http.Request) string {
     return fileroot + "/" + context.Get(req, "username").(string) + "/" + mux.Vars(req)["path"]
 }
 
+func addSlash(rw http.ResponseWriter, req *http.Request) {
+    http.Redirect(rw, req, req.URL.Path + "/", http.StatusMovedPermanently)
+}
+
 func getLogin(rw http.ResponseWriter, req *http.Request) {
     err := tpls.ExecuteTemplate(rw, "login.html", ctx)
     if err != nil {
@@ -126,9 +190,13 @@ func getLogin(rw http.ResponseWriter, req *http.Request) {
 func postLogin(rw http.ResponseWriter, req *http.Request) {
     panicIfErr(req.ParseForm())
     username := req.PostFormValue("username")
+    password := req.PostFormValue("password")
+    panicIfErr(aaa.Login(username, password))
+
     session, _ := cookiejar.Get(req, "auth")
     session.Values["username"] = username
-    panicIfErr(session.Save(req, rw))
+
+    // panicIfErr(session.Save(req, rw))
     http.Redirect(rw, req, "/api", http.StatusAccepted)
     return
 }
@@ -216,17 +284,17 @@ func handleApiDownload(rw http.ResponseWriter, req *http.Request) {
 
     // TODO: Sanitize path, so users can't write to places they shouldn't
     if _, err := os.Stat(path); os.IsNotExist(err) {
-        rw.WriteHeader(http.StatusNotFound)
+        http.Error(rw, "404 file not found.", http.StatusNotFound)
         return
     } else {
         body, err := ioutil.ReadFile(path)
         if err != nil {
-            rw.WriteHeader(http.StatusInternalServerError)
+            http.Error(rw, err.Error(), http.StatusInternalServerError)
             return
         }
         _, err = rw.Write(body)
         if err != nil {
-            rw.WriteHeader(http.StatusInternalServerError)
+            http.Error(rw, err.Error(), http.StatusInternalServerError)
             return
         }
         return
