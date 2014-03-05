@@ -10,7 +10,6 @@ import (
     "os"
     "path/filepath"
     "github.com/gorilla/mux"
-    "github.com/gorilla/sessions"
     "github.com/gorilla/context"
 )
 
@@ -23,8 +22,6 @@ var (
     ctx SiteData = SiteData{Root: "localhost"}
     tpls = template.Must(template.ParseFiles("tpls/login.html"))
     fileroot string = "files"
-    cookiejar = sessions.NewCookieStore([]byte("wombat-secret-key"))
-    authstore = sessions.NewFilesystemStore("data/auth.gob", []byte("wombat-secret-key-2"))
     aaa Authorizer = NewAuthorizer("data/auth", "wombat-salt")
 )
 
@@ -90,14 +87,11 @@ func jsonResponse(Decored handler) handler {
 
 func authorize(Decored handler) handler {
     return func(rw http.ResponseWriter, req *http.Request) {
-        session, err := cookiejar.Get(req, "auth")
-        panicIfErr(err);
-        username := session.Values["username"]
-        if username == nil {
-            http.Error(rw, "You must login to do that.", http.StatusUnauthorized)
+        err, status := aaa.Authorize(rw, req)
+        if err != nil {
+            http.Error(rw, err.Error(), status)
             return
         }
-        context.Set(req, "username", username)
         Decored(rw, req)
     }
 }
@@ -127,14 +121,9 @@ func postLogin(rw http.ResponseWriter, req *http.Request) {
     panicIfErr(req.ParseForm())
     username := req.PostFormValue("username")
     password := req.PostFormValue("password")
-    panicIfErr(aaa.Login(username, password))
+    panicIfErr(aaa.Login(rw, req, username, password))
 
-    session, _ := cookiejar.Get(req, "auth")
-    session.Values["username"] = username
-
-    // panicIfErr(session.Save(req, rw))
     http.Redirect(rw, req, "/api", http.StatusAccepted)
-    return
 }
 
 func handleApiRoot(rw http.ResponseWriter, req *http.Request) {
@@ -159,8 +148,8 @@ func handleApiCreate(rw http.ResponseWriter, req *http.Request) {
         defer req.Body.Close()
         panicIfErr(err);
 
-        panicIfErr(os.MkdirAll(filepath.Dir(path), 0740))
-        panicIfErr(ioutil.WriteFile(path, body, 0740))
+        panicIfErr(os.MkdirAll(filepath.Dir(path), 0640))
+        panicIfErr(ioutil.WriteFile(path, body, 0640))
     } else {
         panic("File exists.")
     }
@@ -193,7 +182,7 @@ func handleApiMove(rw http.ResponseWriter, req *http.Request) {
     if _, err = os.Stat(dstpath); !os.IsNotExist(err) {
         panic("Overwriting destination file.")
     }
-    panicIfErr(os.MkdirAll(filepath.Dir(dstpath), 0740))
+    panicIfErr(os.MkdirAll(filepath.Dir(dstpath), 0640))
     panicIfErr(os.Rename(path, dstpath))
 }
 
@@ -212,7 +201,7 @@ func handleApiModify(rw http.ResponseWriter, req *http.Request) {
     defer req.Body.Close()
     if err != nil { panic(err.Error()) }
 
-    panicIfErr(ioutil.WriteFile(path, body, 0740))
+    panicIfErr(ioutil.WriteFile(path, body, 0640))
 }
 
 func handleApiDownload(rw http.ResponseWriter, req *http.Request) {
