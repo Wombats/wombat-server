@@ -25,7 +25,7 @@ var (
     fileroot string = "files"
     cookiejar = sessions.NewCookieStore([]byte("wombat-secret-key"))
     authstore = sessions.NewFilesystemStore("data/auth.gob", []byte("wombat-secret-key-2"))
-    aaa Authorizer = NewAuthorizer("data/auth")
+    aaa Authorizer = NewAuthorizer("data/auth", "wombat-salt")
 )
 
 func main() {
