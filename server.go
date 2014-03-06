@@ -12,7 +12,7 @@ import (
     "github.com/gorilla/mux"
     "github.com/gorilla/context"
     "github.com/gorilla/securecookie"
-    "github.com/apexskier/goauth"
+    "github.com/Wombats/goauth"
 )
 
 type SiteData struct {
@@ -24,7 +24,7 @@ var (
     ctx SiteData = SiteData{Root: "localhost"}
     tpls = template.Must(template.ParseFiles("tpls/login.html"))
     fileroot string = "files"
-    aaa Authorizer = NewAuthorizer("data/auth", "wombat-salt", securecookie.GenerateRandomKey(32))
+    aaa goauth.Authorizer = goauth.NewAuthorizer("data/auth", "wombat-salt", securecookie.GenerateRandomKey(32))
 )
 
 func main() {
@@ -93,7 +93,7 @@ func jsonResponse(Decored handler) handler {
 
 func authorize(Decored handler) handler {
     return func(rw http.ResponseWriter, req *http.Request) {
-        err := aaa.Authorize(rw, req)
+        err := aaa.Authorize(rw, req, true)
         if err != nil {
             fmt.Println(err)
             http.Redirect(rw, req, "/login", http.StatusSeeOther)
@@ -125,6 +125,11 @@ func getLogin(rw http.ResponseWriter, req *http.Request) {
     messages := aaa.Messages(rw, req)
     if len(messages) > 0 {
         msg = messages[0]
+    }
+    err := aaa.Authorize(rw, req, false)
+    if err == nil {
+        http.Redirect(rw, req, "/api", http.StatusSeeOther)
+        return
     }
     if err := tpls.ExecuteTemplate(rw, "login.html", msg); err != nil {
         http.Error(rw, err.Error(), http.StatusInternalServerError)
