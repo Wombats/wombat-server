@@ -11,6 +11,8 @@ import (
     "path/filepath"
     "github.com/gorilla/mux"
     "github.com/gorilla/context"
+    "github.com/gorilla/securecookie"
+    "github.com/apexskier/goauth"
 )
 
 type SiteData struct {
@@ -22,7 +24,7 @@ var (
     ctx SiteData = SiteData{Root: "localhost"}
     tpls = template.Must(template.ParseFiles("tpls/login.html"))
     fileroot string = "files"
-    aaa Authorizer = NewAuthorizer("data/auth", "wombat-salt")
+    aaa Authorizer = NewAuthorizer("data/auth", "wombat-salt", securecookie.GenerateRandomKey(32))
 )
 
 func main() {
@@ -93,6 +95,7 @@ func authorize(Decored handler) handler {
     return func(rw http.ResponseWriter, req *http.Request) {
         err := aaa.Authorize(rw, req)
         if err != nil {
+            fmt.Println(err)
             http.Redirect(rw, req, "/login", http.StatusSeeOther)
             return
         }
@@ -121,7 +124,7 @@ func getLogin(rw http.ResponseWriter, req *http.Request) {
     var msg string
     messages := aaa.Messages(rw, req)
     if len(messages) > 0 {
-        msg = messages[0].(string)
+        msg = messages[0]
     }
     if err := tpls.ExecuteTemplate(rw, "login.html", msg); err != nil {
         http.Error(rw, err.Error(), http.StatusInternalServerError)
