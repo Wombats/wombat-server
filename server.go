@@ -31,7 +31,9 @@ func main() {
 
     // Pages
     r.HandleFunc("/login", getLogin).Methods("GET")
-    r.HandleFunc("/login", jsonResponse(postLogin)).Methods("POST")
+    r.HandleFunc("/login", postLogin).Methods("POST")
+    r.HandleFunc("/register", postRegister).Methods("POST")
+    r.HandleFunc("/logout", logout)
 
     // Static files
     http.Handle("/static/", http.StripPrefix("/static", http.FileServer(http.Dir("static"))))
@@ -44,7 +46,9 @@ func main() {
     r.HandleFunc(apiroot + "/delete/{path:.*}",     authorize(jsonResponse(handleApiRemove))).Methods("POST")
     r.HandleFunc(apiroot + "/modify/{path:.*}",     authorize(jsonResponse(handleApiModify))).Methods("POST")
     r.HandleFunc(apiroot + "/download/{path:.*}",   authorize(handleApiDownload)).Methods("GET")
+    r.HandleFunc(apiroot + "/list", addSlash);
     r.HandleFunc(apiroot + "/list/{path:.*}",       authorize(handleApiList)).Methods("GET")
+    r.HandleFunc(apiroot + "/tree", addSlash);
     r.HandleFunc(apiroot + "/tree/{path:.*}",       authorize(handleApiTree)).Methods("GET")
 
     r.StrictSlash(false)
@@ -87,9 +91,9 @@ func jsonResponse(Decored handler) handler {
 
 func authorize(Decored handler) handler {
     return func(rw http.ResponseWriter, req *http.Request) {
-        err, status := aaa.Authorize(rw, req)
+        err := aaa.Authorize(rw, req)
         if err != nil {
-            http.Error(rw, err.Error(), status)
+            http.Redirect(rw, req, "/login", http.StatusSeeOther)
             return
         }
         Decored(rw, req)
@@ -103,7 +107,10 @@ func panicIfErr(e error) {
 }
 
 func getDstPath(req *http.Request) string {
-    return fileroot + "/" + context.Get(req, "username").(string) + "/" + mux.Vars(req)["path"]
+    vars := mux.Vars(req)
+    path := vars["path"]
+    user := context.Get(req, "username").(string)
+    return fileroot + "/" + user + "/" + path
 }
 
 func addSlash(rw http.ResponseWriter, req *http.Request) {
@@ -111,8 +118,12 @@ func addSlash(rw http.ResponseWriter, req *http.Request) {
 }
 
 func getLogin(rw http.ResponseWriter, req *http.Request) {
-    err := tpls.ExecuteTemplate(rw, "login.html", ctx)
-    if err != nil {
+    var msg string
+    messages := aaa.Messages(rw, req)
+    if len(messages) > 0 {
+        msg = messages[0].(string)
+    }
+    if err := tpls.ExecuteTemplate(rw, "login.html", msg); err != nil {
         http.Error(rw, err.Error(), http.StatusInternalServerError)
     }
 }
@@ -121,9 +132,30 @@ func postLogin(rw http.ResponseWriter, req *http.Request) {
     panicIfErr(req.ParseForm())
     username := req.PostFormValue("username")
     password := req.PostFormValue("password")
-    panicIfErr(aaa.Login(rw, req, username, password))
+    if err := aaa.Login(rw, req, username, password, "/api"); err != nil {
+        http.Redirect(rw, req, "/login", http.StatusSeeOther)
+    }
+}
 
-    http.Redirect(rw, req, "/api", http.StatusAccepted)
+func postRegister(rw http.ResponseWriter, req *http.Request) {
+    panicIfErr(req.ParseForm())
+    username := req.PostFormValue("username")
+    password := req.PostFormValue("password")
+    email := req.PostFormValue("email_address")
+    if err := aaa.Register(rw, req, username, password, email); err != nil {
+        http.Redirect(rw, req, "/login", http.StatusSeeOther)
+    } else {
+        panicIfErr(os.MkdirAll(filepath.Join(fileroot, username), 0740))
+        postLogin(rw, req)
+    }
+}
+
+func logout(rw http.ResponseWriter, req *http.Request) {
+    if err := aaa.Logout(rw, req); err != nil {
+        panicIfErr(err)
+        return
+    }
+    http.Redirect(rw, req, "/login", http.StatusSeeOther)
 }
 
 func handleApiRoot(rw http.ResponseWriter, req *http.Request) {

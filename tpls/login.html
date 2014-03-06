@@ -28,6 +28,7 @@
     <div class="container">
         <div class="row">
             <div class="col-lg-6 col-lg-offset-3 col-md-8 col-md-offset-2">
+            {{if.}}<div class="alert alert-warning">{{.}}</div>{{end}}
             <ul class="nav nav-tabs nav-justified">
                 <li class="active"><a href="#login" data-toggle="tab">Log in</a></li>
                 <li><a href="#reg" data-toggle="tab">Register</a></li>
@@ -66,7 +67,7 @@
             </div>
         </div>
     </div>
-    <script src="/static/js/libs/jquery-2.1.0.min.js"></script>
-    <script src="/static/js/libs/bootstrap/js/bootstrap.min.js"></script>
+    <script src="/static/libs/jquery-2.1.0.min.js"></script>
+    <script src="/static/libs/bootstrap/js/bootstrap.min.js"></script>
 </body>
 </html>
