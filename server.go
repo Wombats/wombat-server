@@ -12,7 +12,7 @@ import (
     "github.com/gorilla/mux"
     "github.com/gorilla/context"
     "github.com/gorilla/securecookie"
-    "github.com/Wombats/goauth"
+    "github.com/apexskier/goauth"
 )
 
 type SiteData struct {
@@ -24,7 +24,8 @@ var (
     ctx SiteData = SiteData{Root: "localhost"}
     tpls = template.Must(template.ParseFiles("tpls/login.html"))
     fileroot string = "files"
-    aaa goauth.Authorizer = goauth.NewAuthorizer("data/auth", "wombat-salt", securecookie.GenerateRandomKey(32))
+    aaabackend = goauth.NewGobFileAuthBackend("data/auth")
+    aaa goauth.Authorizer = goauth.NewAuthorizer(aaabackend, securecookie.GenerateRandomKey(32))
 )
 
 func main() {
@@ -41,17 +42,17 @@ func main() {
     http.Handle("/static/", http.StripPrefix("/static", http.FileServer(http.Dir("static"))))
 
     // API
-    r.HandleFunc(apiroot, addSlash);
-    r.HandleFunc(apiroot + "/",                     authorize(handleApiRoot)).Methods("GET")
-    r.HandleFunc(apiroot + "/create/{path:.*}",     authorize(jsonResponse(handleApiCreate))).Methods("POST")
-    r.HandleFunc(apiroot + "/move",                 authorize(jsonResponse(handleApiMove))).Methods("POST")
-    r.HandleFunc(apiroot + "/delete/{path:.*}",     authorize(jsonResponse(handleApiRemove))).Methods("POST")
-    r.HandleFunc(apiroot + "/modify/{path:.*}",     authorize(jsonResponse(handleApiModify))).Methods("POST")
-    r.HandleFunc(apiroot + "/download/{path:.*}",   authorize(handleApiDownload)).Methods("GET")
-    r.HandleFunc(apiroot + "/list", addSlash);
-    r.HandleFunc(apiroot + "/list/{path:.*}",       authorize(handleApiList)).Methods("GET")
-    r.HandleFunc(apiroot + "/tree", addSlash);
-    r.HandleFunc(apiroot + "/tree/{path:.*}",       authorize(handleApiTree)).Methods("GET")
+    //r.Handle(apiroot, addSlash);
+    r.Handle(apiroot + "/",                     AuthorizeHandler(handleApiRoot)).Methods("GET")
+    r.Handle(apiroot + "/create/{path:.*}",     AuthorizeHandler(JsonResponse(handleApiCreate))).Methods("POST")
+    r.Handle(apiroot + "/move",                 AuthorizeHandler(JsonResponse(handleApiMove))).Methods("POST")
+    r.Handle(apiroot + "/delete/{path:.*}",     AuthorizeHandler(JsonResponse(handleApiRemove))).Methods("POST")
+    r.Handle(apiroot + "/modify/{path:.*}",     AuthorizeHandler(JsonResponse(handleApiModify))).Methods("POST")
+    r.Handle(apiroot + "/download/{path:.*}",   AuthorizeHandler(handleApiDownload)).Methods("GET")
+    //r.Handle(apiroot + "/list", addSlash);
+    r.Handle(apiroot + "/list/{path:.*}",       AuthorizeHandler(handleApiList)).Methods("GET")
+    //r.Handle(apiroot + "/tree", addSlash);
+    r.Handle(apiroot + "/tree/{path:.*}",       AuthorizeHandler(handleApiTree)).Methods("GET")
 
     r.StrictSlash(false)
 
@@ -71,9 +72,7 @@ func (r JsonString) String() (s string) {
     return
 }
 
-type handler func(rw http.ResponseWriter, req *http.Request)
-
-func jsonResponse(Decored handler) handler {
+func JsonResponse(Decored http.HandlerFunc) http.HandlerFunc {
     return func(rw http.ResponseWriter, req *http.Request) {
         var (
             status string = "success"
@@ -91,7 +90,7 @@ func jsonResponse(Decored handler) handler {
     }
 }
 
-func authorize(Decored handler) handler {
+func AuthorizeHandler(Decored http.HandlerFunc) http.HandlerFunc {
     return func(rw http.ResponseWriter, req *http.Request) {
         err := aaa.Authorize(rw, req, true)
         if err != nil {
@@ -128,7 +127,7 @@ func getLogin(rw http.ResponseWriter, req *http.Request) {
     }
     err := aaa.Authorize(rw, req, false)
     if err == nil {
-        http.Redirect(rw, req, "/api", http.StatusSeeOther)
+        http.Redirect(rw, req, "/api/", http.StatusSeeOther)
         return
     }
     if err := tpls.ExecuteTemplate(rw, "login.html", msg); err != nil {
@@ -140,7 +139,7 @@ func postLogin(rw http.ResponseWriter, req *http.Request) {
     panicIfErr(req.ParseForm())
     username := req.PostFormValue("username")
     password := req.PostFormValue("password")
-    if err := aaa.Login(rw, req, username, password, "/api"); err != nil {
+    if err := aaa.Login(rw, req, username, password, "/api/"); err != nil {
         http.Redirect(rw, req, "/login", http.StatusSeeOther)
     }
 }
