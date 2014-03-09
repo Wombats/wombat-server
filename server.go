@@ -12,7 +12,7 @@ import (
     "github.com/gorilla/mux"
     "github.com/gorilla/context"
     "github.com/gorilla/securecookie"
-    "github.com/apexskier/goauth"
+    "github.com/apexskier/httpauth"
 )
 
 type SiteData struct {
